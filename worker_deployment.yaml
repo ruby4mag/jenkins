@@ -1,0 +1,52 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('CleanUp') {
+            steps {
+                 cleanWs()
+            }
+        }
+        stage('Worker - SCM Checkout') {
+            steps {
+                // Get some code from a GitHub repository
+               checkout scmGit(branches: [[name: '*']], extensions: [], userRemoteConfigs: [[credentialsId: 'GitHub-BSRapp', url: 'https://github.com/ruby4mag/bsrapp-worker.git']])
+
+            }
+        }
+        stage('Backend - Install node modules') {
+             // Building react client
+            steps {
+               sh "npm install "
+
+            }
+        }
+        stage('Backend - Build docker image') {
+            // Building nodejs backend
+            steps {
+                sh "docker build -t magingeorge/worker:${BUILD_NUMBER} ."
+            }
+        }
+        stage('Backend - Pushing new server image to dockerhub') {
+             // Pushing new image to dockerhub
+            steps {
+                withCredentials([string(credentialsId: 'dockerhubPassword',  variable: 'dockerpwd')]) {
+                    sh "docker login registry-1.docker.io -u magingeorge@gmail.com -p ${dockerpwd}"
+                    sh "docker push magingeorge/worker:${BUILD_NUMBER}"
+                }
+            }
+        }
+        stage('Backend - create the deployment manifest with updated build number') {
+             // Pushing new image to dockerhub
+            steps {
+                withKubeConfig([credentialsId: 'do-kubeconfig', serverUrl: 'https://5dda7d2c-fe35-4299-b5b4-b27adfb59e66.k8s.ondigitalocean.com']) {
+                    sh "cat deployment.yaml"
+                    sh "cat deployment.yaml | sed -e 's/JENKINS_BUILD_NUMBER/${BUILD_NUMBER}/' > deployment1.yaml"
+                    sh "mv  deployment1.yaml deployment.yaml"
+                    sh "cat deployment.yaml"
+                    sh ' kubectl apply -f deployment.yaml '
+                }
+            }
+        }
+    }
+}
